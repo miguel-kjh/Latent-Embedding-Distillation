@@ -77,21 +77,20 @@ class TextDataModule(pl.LightningDataModule):
         assert block_size % patch_size == 0, f"Block size ({block_size}) must be divisible by patch size ({patch_size})"
 
         # Aplicar transformaciones
-        with self.tokenizer.deprecation_warnings(False): # Silenciar warnings molestos
-            tokenized_datasets = dataset.map(
-                tokenize_function,
-                batched=True,
-                num_proc=self.hparams.num_workers,
-                remove_columns=[text_col],
-                desc="Tokenizing dataset"
-            )
+        tokenized_datasets = dataset.map(
+            tokenize_function,
+            batched=True,
+            num_proc=self.hparams.num_workers,
+            remove_columns=[text_col],
+            desc="Tokenizing dataset"
+        )
 
-            self.lm_datasets = tokenized_datasets.map(
-                group_texts,
-                batched=True,
-                num_proc=self.hparams.num_workers,
-                desc=f"Grouping texts in chunks of {block_size}"
-            )
+        self.lm_datasets = tokenized_datasets.map(
+            group_texts,
+            batched=True,
+            num_proc=self.hparams.num_workers,
+            desc=f"Grouping texts in chunks of {block_size}"
+        )
 
     def train_dataloader(self):
         return DataLoader(
