@@ -8,7 +8,7 @@ class AutoencoderConfig(PretrainedConfig):
         self,
         vocab_size: int = 32000,
         hidden_size: int = 512,
-        intermediate_size: int = 2048,  # Ajustado a un valor más estándar para size 512
+        intermediate_size: int = 2048,  # Ajustado a un valor más estándar para size 2048
         num_encoder_layers: int = 2,
         num_decoder_layers: int = 2,
         latent_size: int = 128,
@@ -23,6 +23,7 @@ class AutoencoderConfig(PretrainedConfig):
         bos_token_id: int = 1,
         eos_token_id: int = 2,
         tie_word_embeddings: bool = True,
+        embedding_layer_weights = None,
         **kwargs,
     ):
         """

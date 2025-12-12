@@ -2,6 +2,7 @@
 import argparse
 import torch
 import pytorch_lightning as pl
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
@@ -18,7 +19,7 @@ def main(args):
         dataset_config_name=args.dataset_config_name,
         train_file=args.train_file,
         validation_file=args.validation_file,
-        tokenizer_name=args.tokenizer_name,
+        tokenizer_name=args.llm_name,
         batch_size=args.batch_size,
         max_length=args.max_length,
         patch_size=args.patch_size,
@@ -26,14 +27,24 @@ def main(args):
     )
     
     # Llamamos a setup() manualmente para cargar el tokenizer y obtener vocab_size
-    data_module.setup()
-    vocab_size = len(data_module.tokenizer)
+
+    # Obtener pesos de la capa de embeddings del modelo base
+    base_model = AutoModelForCausalLM.from_pretrained(args.llm_name)
+    tokenizer = AutoTokenizer.from_pretrained(args.llm_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    embedding_layer_weights = base_model.get_input_embeddings().weight.data.clone()
+    print("Loaded embedding layer weights from base model.")
+    vocab_size = embedding_layer_weights.size(0)
+    hidden_size = embedding_layer_weights.size(1)
     print(f"Vocab size detected: {vocab_size}")
+    print(f"Embedding layer size: {hidden_size}")
+    del base_model  # Liberar memoria
 
     # 2. Configurar Modelo
     config = AutoencoderConfig(
         vocab_size=vocab_size,
-        hidden_size=args.hidden_size,
+        hidden_size=hidden_size,
         intermediate_size=args.intermediate_size,
         num_encoder_layers=args.num_encoder_layers,
         num_decoder_layers=args.num_decoder_layers,
@@ -41,12 +52,16 @@ def main(args):
         patch_size=args.patch_size,
         ae_dropout=args.ae_dropout,
         kl_weight=args.kl_weight,
-        pad_token_id=data_module.tokenizer.pad_token_id,
-        bos_token_id=data_module.tokenizer.bos_token_id,
-        eos_token_id=data_module.tokenizer.eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
     )
 
     model = CALMAutoencoder(config)
+
+    model.encoder.embed_tokens.weight.data = embedding_layer_weights.clone()
+    model.encoder.embed_tokens.weight.requires_grad = False
+
 
     # 3. Callbacks y Logger
     checkpoint_callback = ModelCheckpoint(
@@ -62,6 +77,7 @@ def main(args):
 
     # Usar WandB si está instalado, sino TensorBoard
     try:
+        logger = None
         logger = WandbLogger(project="calm-autoencoder", name=args.run_name)
     except:
         logger = TensorBoardLogger("tb_logs", name=args.run_name)
@@ -75,7 +91,7 @@ def main(args):
         gradient_clip_val=1.0,
         callbacks=[checkpoint_callback, lr_monitor],
         logger=logger,
-        log_every_n_steps=10,
+        log_every_n_steps=10,   
         accumulate_grad_batches=args.accumulate_grad_batches
     )
 
@@ -91,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_config_name", type=str, default=None, help="Config del dataset")
     parser.add_argument("--train_file", type=str, default=None, help="Ruta a archivo de texto local")
     parser.add_argument("--validation_file", type=str, default=None, help="Ruta a archivo de validación local")
-    parser.add_argument("--tokenizer_name", type=str, default="gpt2", help="Tokenizer base (ej. gpt2, llama)")
+    parser.add_argument("--llm_name", type=str, default="gpt2", help="Nombre del modelo/tokenizer preentrenado")
     
     # Hiperparámetros de Modelo
     parser.add_argument("--patch_size", type=int, default=4, help="K tokens a comprimir")
@@ -109,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_steps", type=int, default=50000)
     parser.add_argument("--accumulate_grad_batches", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=16)
     parser.add_argument("--output_dir", type=str, default="./checkpoints")
     parser.add_argument("--run_name", type=str, default="calm-ae-run")
 
